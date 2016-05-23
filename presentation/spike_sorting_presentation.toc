@@ -1,0 +1,8 @@
+\beamer@endinputifotherversion {3.36pt}
+\select@language {english}
+\beamer@sectionintoc {1}{What is Spike sorting?}{2}{0}{1}
+\beamer@sectionintoc {2}{Spike sorting's applications}{3}{0}{2}
+\beamer@sectionintoc {3}{What does the problem look like?}{5}{0}{3}
+\beamer@sectionintoc {4}{Challenges}{10}{0}{4}
+\beamer@sectionintoc {5}{Project's Objectives}{12}{0}{5}
+\beamer@sectionintoc {6}{END}{13}{0}{6}
