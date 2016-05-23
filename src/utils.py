@@ -1,3 +1,6 @@
+import scipy as sp
+
+
 def generate_waveforms(channels_nr=4, waveforms_nr=2, data_len=10000, window_size=21):
     # single channel waveform prototype
     # two phases of sine for the basic features
