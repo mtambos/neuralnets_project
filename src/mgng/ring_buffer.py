@@ -32,8 +32,10 @@ class RingBuffer(np.ndarray):
         return np.ndarray.__array_wrap__(self, out_arr, context)
 
     def extend(self, xs):
-        'Adds array xs to the ring buffer. If xs is longer than the ring '
-        'buffer, the last len(ring buffer) of xs are added the ring buffer.'
+        """
+        Adds array xs to the ring buffer. If xs is longer than the ring
+        buffer, the last len(ring buffer) of xs are added the ring buffer.
+        """
         xs = np.asarray(xs)
         if self.shape[1:] != xs.shape[1:]:
             raise ValueError("Element's shape mismatch. RingBuffer.shape={}. "
@@ -48,7 +50,7 @@ class RingBuffer(np.ndarray):
         self[-len_xs:] = xs
 
     def append(self, x):
-        'Adds element x to the ring buffer.'
+        """Adds element x to the ring buffer."""
         x = np.asarray(x)
         if self.shape[1:] != x.shape:
             raise ValueError("Element's shape mismatch. RingBuffer.shape={}. "
