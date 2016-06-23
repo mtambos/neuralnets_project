@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 from __future__ import division
 
 import os
@@ -15,8 +17,9 @@ from mgng import mgng
 
 
 # noinspection PyPep8Naming
-def fit_with_params(params, X, firings, window_size):
+def fit_with_params(params, X, firings, window_size, i):
     pid = os.getpid()
+    print "fitting {}th iteration. PID: {}".format(i, pid)
     try:
         params['alpha'] = abs(params['alpha'])
         params['beta'] = abs(params['beta'])
@@ -28,12 +31,13 @@ def fit_with_params(params, X, firings, window_size):
         estimator = mgng.MGNG(**params)
         estimator.fit(X)
         score = mgng.scorer(window_size, firings, estimator, spk_aggr_func)
-        ret_val = score + (params,)
+        ret_val = score + (params, spk_aggr_func)
         pprint.pprint(ret_val)
     except Exception as e:
         pprint.pprint(e)
-        ret_val = (-np.infty, -np.infty, np.infty, params)
+        ret_val = (-np.infty, -np.infty, np.infty, params, spk_aggr_func)
 
+    print "{}th iteration finished. PID: {}".format(i, pid)
     with open('hyperparam_ot_{}.log'.format(pid), 'ab') as fp:
         fp.write('{}\n'.format(pprint.pformat(ret_val)))
     return ret_val
@@ -90,12 +94,19 @@ def main():
         firings.set_index('fire_idx', drop=False, inplace=True)
         firings.to_csv(firings_fname, index=False)
 
-    a_alpha, b_alpha = _calc_truncnorm_a_b(0, 1, 0.5)
+    a_alpha, b_alpha = _calc_truncnorm_a_b(0, 1, 0.4)
     a_beta, b_beta = _calc_truncnorm_a_b(0, 1, 0.5)
-    a_e_w, b_e_w = _calc_truncnorm_a_b(0, 1, 0.05)
-    a_e_n, b_e_n = _calc_truncnorm_a_b(0, 1, 0.0006)
-    a_eta, b_eta = _calc_truncnorm_a_b(0, 1, 0.9995)
+    a_e_w, b_e_w = _calc_truncnorm_a_b(0, 1, 0.9)
+    a_e_n, b_e_n = _calc_truncnorm_a_b(0, 1, 0.4)
+    a_eta, b_eta = _calc_truncnorm_a_b(0, 1, 0.3)
     param_space = {
+        # 'alpha': [0.39794323643107143],
+        # 'beta': [0.47455583402142376],
+        # 'gamma': [8443],
+        # 'e_w': [0.9185565637630273],
+        # 'e_n': [0.41185290298184318],
+        # 'eta': [0.34436856439985564],
+        # 'theta': [5],
         'alpha': truncnorm(a_alpha, b_alpha),
         'beta': truncnorm(a_beta, b_beta),
         'gamma': randint(50, 10000),
@@ -104,24 +115,25 @@ def main():
         'eta': truncnorm(a_eta, b_eta),
         'dimensions': [channels_nr],
         'theta': randint(5, 150),
+        'dimensions': [channels_nr],
         'spk_aggr_func': ['mean', 'sum'],
         'verbose': [False]
     }
 
     param_sampler = ParameterSampler(param_space, n_iter=30)
 
-    data = data.iloc[:, :-1]
+    upper_limit = 1000000
+    data = data.iloc[:upper_limit, :-1]
     # noinspection PyPep8Naming
     X = pd.DataFrame(MinMaxScaler().fit_transform(data),
                      columns=data.columns, index=data.index)
-
-    partial_firings = firings
+    partial_firings = firings[(firings.fire_idx < upper_limit)]
 
     nbytes = sum(block.values.nbytes for block in X.blocks.values())
     parallel = Parallel(n_jobs=6, max_nbytes=nbytes)
     result = parallel(delayed(fit_with_params)(params, X, partial_firings,
-                                               window_size)
-                      for params in param_sampler)
+                                               window_size, i)
+                      for i, params in enumerate(param_sampler))
 
     result = sorted(result)
     dump(result, './hyperparam_opt_result.pickle', compress=3)
