@@ -83,11 +83,15 @@ def main():
     firings_fname = '{}n_{}c_{}l_firings.csv'.format(neuron_nr, channels_nr,
                                                      data_len)
 
+    print "looking for files {}, {}".format(data_fname, firings_fname)
     if os.path.exists(data_fname):
+        print "files {}, {} found".format(data_fname, firings_fname)
         data = pd.read_csv(data_fname)
         firings = pd.read_csv(firings_fname, index_col=0)
         firings.columns = ['neuron', 'fire_idx']
     else:
+        print "files {}, {} not found, generating data".format(data_fname,
+                                                               firings_fname)
         data, neurons = generate_waveforms(data_len=data_len,
                                            channels_nr=channels_nr,
                                            neuron_params=neuron_params,
@@ -124,7 +128,6 @@ def main():
         'e_w': truncnorm(a_e_w, b_e_w),
         'e_n': truncnorm(a_e_n, b_e_n),
         'eta': truncnorm(a_eta, b_eta),
-        'dimensions': [channels_nr],
         'theta': randint(20, 80),
         'dimensions': [channels_nr],
         'spk_aggr_func': ['mean', 'sum'],
