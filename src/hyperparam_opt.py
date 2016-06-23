@@ -30,7 +30,8 @@ def fit_with_params(params, X, firings, window_size, i):
         del params['spk_aggr_func']
         estimator = mgng.MGNG(**params)
         estimator.fit(X)
-        score = mgng.scorer(window_size, firings, estimator, spk_aggr_func)
+        winner_units = estimator.transform(X)
+        score = mgng.scorer(winner_units, window_size, firings, spk_aggr_func)
         ret_val = score + (params, spk_aggr_func)
         pprint.pprint(ret_val)
     except Exception as e:
