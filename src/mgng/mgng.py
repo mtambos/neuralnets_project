@@ -27,12 +27,11 @@ from numpy.random import random_sample
 
 import networkx as nx
 import numpy as np
+from numba import autojit
+import pandas as pd
+from scipy.spatial.distance import pdist
 from sklearn.base import BaseEstimator
 from sklearn.preprocessing import OneHotEncoder
-# import numpy.linalg as lnp
-# import numexpr as ne
-import pandas as pd
-from numba import autojit
 
 
 # noinspection PyPep8Naming
@@ -85,19 +84,25 @@ def _get_spike_encodings(firings, unit_encodings, window_size, spk_aggr_func):
     indexes = np.array([np.arange(i, i + window_size) for i in fire_ids])
     if spk_aggr_func == 'mean':
         encodings = unit_encodings[indexes].mean(axis=1)
+        encodings = pd.DataFrame(encodings, index=fire_ids)
     else:
         encodings = unit_encodings[indexes].sum(axis=1).astype(bool)
-    encodings = pd.DataFrame(encodings, index=fire_ids)
+        encodings = pd.DataFrame(encodings, index=fire_ids, dtype=bool)
     return firings.join(encodings)
 
 
 def _get_encoding_mean_corr(encoding):
     corr_matrix = encoding.iloc[:, 2:].T.corr()
     corr_len = len(corr_matrix)
-    corr_matrix = corr_matrix.as_matrix() - np.eye(corr_len)
+    corr_matrix = corr_matrix.as_matrix()
     indexes = np.tril_indices(corr_len, -1)
     corr_matrix = corr_matrix[indexes]
     return corr_matrix.mean()
+
+
+def _get_encoding_mean_dist(encoding):
+    distances = pdist(encoding.iloc[:, 2:].T)
+    return distances.mean()
 
 
 def scorer(window_size, firings, estimator, spk_aggr_func):
@@ -105,19 +110,19 @@ def scorer(window_size, firings, estimator, spk_aggr_func):
     unit_encoder = OneHotEncoder(sparse=False)
     unit_encodings = unit_encoder.fit_transform(winner_units[:, np.newaxis])
     spike_encodings = _get_spike_encodings(firings, unit_encodings,
-                                           window_size)
+                                           window_size, spk_aggr_func)
 
-    spike_encoding_mean_corr = spike_encodings.groupby('neuron').apply(
-        _get_encoding_mean_corr
+    spike_encoding_mean_dist = spike_encodings.groupby('neuron').apply(
+        _get_encoding_mean_dist
     )
-    spike_encoding_error = spike_encoding_mean_corr.mean()
+    spike_encoding_error = spike_encoding_mean_dist.mean()
 
     mean_neuron_encodings = spike_encodings.groupby('neuron').apply(
         lambda g: g.iloc[:, 2:].mean()
     )
-    neuron_encoding_error = _get_encoding_mean_corr(mean_neuron_encodings)
+    neuron_encoding_error = _get_encoding_mean_dist(mean_neuron_encodings)
 
-    ret_val = spike_encoding_error - np.abs(neuron_encoding_error)
+    ret_val = neuron_encoding_error - spike_encoding_error
     return ret_val, spike_encoding_error, neuron_encoding_error
 
 
@@ -337,13 +342,27 @@ class MGNG(BaseEstimator):
         self.winners = winners
         return self
 
+    # noinspection PyPep8Naming
+    def transform(self, X):
+        X = np.asarray(X)
+        verbose = self.verbose
+        points_nr = len(X)
+        winners = np.zeros(points_nr)
+        for t, xt in enumerate(X):
+            if verbose and t % (points_nr//10) == 0:
+                print("{}% done".format(100*t//points_nr))
+            winners[t], _ = self.time_step(xt)
+
+        return winners
+
     def find_winner_neurons(self, xt):
         return _find_winner_neurons(xt, self.weights, self.contexts,
                                     self.c_t, self.alpha)
         
-    def time_step(self, xt):
+    def time_step(self, xt, train=True):
         """
         :param xt: current data point
+        :param train: whether to update the current parameters
         """
         # 6. find winner r and second winner s
         xt = np.reshape(xt, newshape=self.dimensions)
@@ -354,32 +373,33 @@ class MGNG(BaseEstimator):
         # 7. Ct+1 := (1 - \beta)*w_r + \beta*c_r
         c_t1 = (1 - self.beta) * self.weights[r] + self.beta * self.contexts[r]
 
-        # 8. connect r with s: E := E \cup {(r, s)}
-        # 9. age(r;s) := 0
-        self._add_edge(r, s)
+        if train:
+            # 8. connect r with s: E := E \cup {(r, s)}
+            # 9. age(r;s) := 0
+            self._add_edge(r, s)
 
-        # 10. increment counter of r: e_r := e_r + 1
-        self.errors[r] += 1
+            # 10. increment counter of r: e_r := e_r + 1
+            self.errors[r] += 1
 
-        # 11. update neuron r and its direct topological neighbors:
-        self._update_neighbors(r, xt)
+            # 11. update neuron r and its direct topological neighbors:
+            self._update_neighbors(r, xt)
 
-        # 12. increment the age of all edges connected with r
-        self._increment_edges_age(r)
+            # 12. increment the age of all edges connected with r
+            self._increment_edges_age(r)
 
-        # 13. remove old connections E := E \ {(a, b)| age_(a, b) > \gamma}
-        self._remove_old_edges()
+            # 13. remove old connections E := E \ {(a, b)| age_(a, b) > \gamma}
+            self._remove_old_edges()
 
-        # 14. delete all nodes with no connections.
-        self._remove_unconnected_neurons()
+            # 14. delete all nodes with no connections.
+            self._remove_unconnected_neurons()
 
-        # 15. create new neuron if t mod \lambda = 0 and |K| < \theta
-        if self.t % self.lmbda == 0 and len(self.model.nodes()) < self.theta:
-            self._create_new_neuron()
+            # 15. create new neuron if t mod \lambda = 0 and |K| < \theta
+            if self.t % self.lmbda == 0 and len(self.model.nodes()) < self.theta:
+                self._create_new_neuron()
 
-        # 16. decrease counter of all neurons by the factor \eta:
-        #    e_n := \eta * e_n (\forall n \in K)
-        self.errors *= self.eta
+            # 16. decrease counter of all neurons by the factor \eta:
+            #    e_n := \eta * e_n (\forall n \in K)
+            self.errors *= self.eta
 
         # 7. Ct+1 := (1 - \beta)*w_r + \beta*c_r
         self.c_t = c_t1
