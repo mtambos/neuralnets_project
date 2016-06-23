@@ -23,10 +23,9 @@ Based on:
 
 from __future__ import print_function, division
 
-from numpy.random import random_sample
-
 import networkx as nx
 import numpy as np
+from numpy.random import random_sample
 from numba import autojit
 import pandas as pd
 from scipy.spatial.distance import pdist
@@ -113,7 +112,7 @@ def scorer(winner_units, window_size, firings, spk_aggr_func, nrn_aggr_func,
                                            window_size, spk_aggr_func)
 
     spike_encoding_mean_dist = spike_encodings.groupby('neuron').apply(
-        _get_encoding_mean_dist, args=(dist_metric,)
+        lambda g: _get_encoding_mean_dist(g, dist_metric)
     )
     spike_encoding_error = spike_encoding_mean_dist.mean()
 
@@ -400,7 +399,8 @@ class MGNG(BaseEstimator):
             self._remove_unconnected_neurons()
 
             # 15. create new neuron if t mod \lambda = 0 and |K| < \theta
-            if self.t % self.lmbda == 0 and len(self.model.nodes()) < self.theta:
+            if (self.t % self.lmbda == 0 and
+                        len(self.model.nodes()) < self.theta):
                 self._create_new_neuron()
 
             # 16. decrease counter of all neurons by the factor \eta:
