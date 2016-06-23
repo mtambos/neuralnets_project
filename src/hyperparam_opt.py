@@ -7,6 +7,7 @@ import pprint
 
 from joblib import Parallel, delayed, dump
 import pandas as pd
+import psutil
 import numpy as np
 from sklearn.grid_search import ParameterSampler
 from sklearn.preprocessing import MinMaxScaler
@@ -20,23 +21,32 @@ from mgng import mgng
 def fit_with_params(params, X, firings, window_size, i):
     pid = os.getpid()
     print "fitting {}th iteration. PID: {}".format(i, pid)
+    params['alpha'] = abs(params['alpha'])
+    params['beta'] = abs(params['beta'])
+    params['eta'] = abs(params['eta'])
+    params['e_n'] = abs(params['e_n'])
+    params['e_w'] = abs(params['e_w'])
+    if params['e_n'] > params['e_w']:
+        params['e_w'], params['e_n'] = params['e_n'], params['e_w']
+
+    spk_aggr_func = params['spk_aggr_func']
+    nrn_aggr_func = params['nrn_aggr_func']
+    dist_metric = params['dist_metric']
+    mgng_params = dict(params)
+    del mgng_params['spk_aggr_func']
+    del mgng_params['nrn_aggr_func']
+    del mgng_params['dist_metric']
     try:
-        params['alpha'] = abs(params['alpha'])
-        params['beta'] = abs(params['beta'])
-        params['e_n'] = abs(params['e_n'])
-        params['e_w'] = abs(params['e_w'])
-        params['eta'] = abs(params['eta'])
-        spk_aggr_func = params['spk_aggr_func']
-        del params['spk_aggr_func']
-        estimator = mgng.MGNG(**params)
+        estimator = mgng.MGNG(**mgng_params)
         estimator.fit(X)
         winner_units = estimator.transform(X)
-        score = mgng.scorer(winner_units, window_size, firings, spk_aggr_func)
-        ret_val = score + (params, spk_aggr_func)
+        score = mgng.scorer(winner_units, window_size, firings,
+                            spk_aggr_func, nrn_aggr_func, dist_metric)
+        ret_val = score + (params,)
         pprint.pprint(ret_val)
     except Exception as e:
         pprint.pprint(e)
-        ret_val = (-np.infty, -np.infty, np.infty, params, spk_aggr_func)
+        ret_val = (-np.infty, -np.infty, np.infty, params)
 
     print "{}th iteration finished. PID: {}".format(i, pid)
     with open('hyperparam_ot_{}.log'.format(pid), 'ab') as fp:
@@ -95,11 +105,11 @@ def main():
         firings.set_index('fire_idx', drop=False, inplace=True)
         firings.to_csv(firings_fname, index=False)
 
-    a_alpha, b_alpha = _calc_truncnorm_a_b(0, 1, 0.4)
+    a_alpha, b_alpha = _calc_truncnorm_a_b(0, 1, 0.5)
     a_beta, b_beta = _calc_truncnorm_a_b(0, 1, 0.5)
-    a_e_w, b_e_w = _calc_truncnorm_a_b(0, 1, 0.9)
-    a_e_n, b_e_n = _calc_truncnorm_a_b(0, 1, 0.4)
-    a_eta, b_eta = _calc_truncnorm_a_b(0, 1, 0.3)
+    a_e_w, b_e_w = _calc_truncnorm_a_b(0, 1, 0.05)
+    a_e_n, b_e_n = _calc_truncnorm_a_b(0, 1, 0.0005)
+    a_eta, b_eta = _calc_truncnorm_a_b(0, 1, 0.33)
     param_space = {
         # 'alpha': [0.39794323643107143],
         # 'beta': [0.47455583402142376],
@@ -110,20 +120,22 @@ def main():
         # 'theta': [5],
         'alpha': truncnorm(a_alpha, b_alpha),
         'beta': truncnorm(a_beta, b_beta),
-        'gamma': randint(50, 10000),
+        'gamma': randint(5000, 10000),
         'e_w': truncnorm(a_e_w, b_e_w),
         'e_n': truncnorm(a_e_n, b_e_n),
         'eta': truncnorm(a_eta, b_eta),
         'dimensions': [channels_nr],
-        'theta': randint(5, 150),
+        'theta': randint(20, 80),
         'dimensions': [channels_nr],
         'spk_aggr_func': ['mean', 'sum'],
+        'nrn_aggr_func': ['median', 'mean'],
+        'dist_metric': ['cosine', 'hamming'],
         'verbose': [False]
     }
 
-    param_sampler = ParameterSampler(param_space, n_iter=30)
+    param_sampler = ParameterSampler(param_space, n_iter=60)
 
-    upper_limit = 1000000
+    upper_limit = len(data)
     data = data.iloc[:upper_limit, :-1]
     # noinspection PyPep8Naming
     X = pd.DataFrame(MinMaxScaler().fit_transform(data),
@@ -131,7 +143,9 @@ def main():
     partial_firings = firings[(firings.fire_idx < upper_limit)]
 
     nbytes = sum(block.values.nbytes for block in X.blocks.values())
-    parallel = Parallel(n_jobs=6, max_nbytes=nbytes)
+
+    n_jobs = psutil.cpu_count() - 2
+    parallel = Parallel(n_jobs=n_jobs, max_nbytes=nbytes)
     result = parallel(delayed(fit_with_params)(params, X, partial_firings,
                                                window_size, i)
                       for i, params in enumerate(param_sampler))

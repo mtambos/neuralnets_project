@@ -87,7 +87,7 @@ def _get_spike_encodings(firings, unit_encodings, window_size, spk_aggr_func):
         encodings = pd.DataFrame(encodings, index=fire_ids)
     else:
         encodings = unit_encodings[indexes].sum(axis=1).astype(bool)
-        encodings = pd.DataFrame(encodings, index=fire_ids, dtype=bool)
+        encodings = pd.DataFrame(encodings, index=fire_ids, dtype=int)
     return firings.join(encodings)
 
 
@@ -100,26 +100,33 @@ def _get_encoding_mean_corr(encoding):
     return corr_matrix.mean()
 
 
-def _get_encoding_mean_dist(encoding):
-    distances = pdist(encoding.iloc[:, 2:].T)
+def _get_encoding_mean_dist(encoding, dist_metric):
+    distances = pdist(encoding.iloc[:, 2:].T, metric=dist_metric)
     return distances.mean()
 
 
-def scorer(winner_units, window_size, firings, spk_aggr_func):
+def scorer(winner_units, window_size, firings, spk_aggr_func, nrn_aggr_func,
+           dist_metric):
     unit_encoder = OneHotEncoder(sparse=False)
     unit_encodings = unit_encoder.fit_transform(winner_units[:, np.newaxis])
     spike_encodings = _get_spike_encodings(firings, unit_encodings,
                                            window_size, spk_aggr_func)
 
     spike_encoding_mean_dist = spike_encodings.groupby('neuron').apply(
-        _get_encoding_mean_dist
+        _get_encoding_mean_dist, args=(dist_metric,)
     )
     spike_encoding_error = spike_encoding_mean_dist.mean()
 
-    mean_neuron_encodings = spike_encodings.groupby('neuron').apply(
-        lambda g: g.iloc[:, 2:].mean()
-    )
-    neuron_encoding_error = _get_encoding_mean_dist(mean_neuron_encodings)
+    if nrn_aggr_func == 'median':
+        mean_neuron_encodings = spike_encodings.groupby('neuron').apply(
+            lambda g: g.iloc[:, 2:].median().astype(bool).astype(int)
+        )
+    else:
+        mean_neuron_encodings = spike_encodings.groupby('neuron').apply(
+            lambda g: g.iloc[:, 2:].mean()
+        )
+    neuron_encoding_error = _get_encoding_mean_dist(mean_neuron_encodings,
+                                                    dist_metric)
 
     ret_val = neuron_encoding_error - spike_encoding_error
     return ret_val, spike_encoding_error, neuron_encoding_error
