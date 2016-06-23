@@ -105,8 +105,7 @@ def _get_encoding_mean_dist(encoding):
     return distances.mean()
 
 
-def scorer(window_size, firings, estimator, spk_aggr_func):
-    winner_units = estimator.winners
+def scorer(winner_units, window_size, firings, spk_aggr_func):
     unit_encoder = OneHotEncoder(sparse=False)
     unit_encodings = unit_encoder.fit_transform(winner_units[:, np.newaxis])
     spike_encodings = _get_spike_encodings(firings, unit_encodings,
