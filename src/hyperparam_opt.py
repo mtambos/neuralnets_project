@@ -42,14 +42,15 @@ def fit_with_params(params, X, firings, window_size, i):
         winner_units = estimator.transform(X)
         score = mgng.scorer(winner_units, window_size, firings,
                             spk_aggr_func, nrn_aggr_func, dist_metric)
-        ret_val = score + (params,)
+        ret_val = score + (params, pid)
         pprint.pprint(ret_val)
+        dump(winner_units, 'winner_units_{}.pickle'.format(pid), compress=3)
     except Exception as e:
         pprint.pprint(e)
-        ret_val = (-np.infty, -np.infty, np.infty, params)
+        ret_val = (-np.infty, -np.infty, np.infty, params, pid)
 
     print "{}th iteration finished. PID: {}".format(i, pid)
-    with open('hyperparam_ot_{}.log'.format(pid), 'ab') as fp:
+    with open('hyperparam_opt_{}.log'.format(pid), 'ab') as fp:
         fp.write('{}\n'.format(pprint.pformat(ret_val)))
     return ret_val
 
