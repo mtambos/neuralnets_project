@@ -11,21 +11,38 @@ import psutil
 import numpy as np
 from sklearn.grid_search import ParameterSampler
 from sklearn.preprocessing import MinMaxScaler
-from scipy.stats import randint, truncnorm
+import rtnorm as rt
+from scipy.stats import randint
 
 from utils import generate_waveforms, NeuronConfig
 from mgng import mgng
+
+
+class TruncNorm(object):
+    def __init__(self, a, b, loc, scale):
+        self.a = a
+        self.b = b
+        self.loc = loc
+        self.scale = scale
+
+    def rvs(self):
+        return rt.rtnorm(self.a, self.b, mu=self.loc, sigma=self.scale)[0]
+
+
+# noinspection PyPep8Naming
+def transform_data(X, window_size):
+    data_len = X.shape[0] - window_size + 1
+
+    transformed_data = np.array([X[i: i+window_size].T.flatten()
+                                 for i in xrange(data_len)])
+
+    return transformed_data
 
 
 # noinspection PyPep8Naming
 def fit_with_params(params, X, firings, window_size, i):
     pid = os.getpid()
     print "fitting {}th iteration. PID: {}".format(i, pid)
-    params['alpha'] = abs(params['alpha'])
-    params['beta'] = abs(params['beta'])
-    params['eta'] = abs(params['eta'])
-    params['e_n'] = abs(params['e_n'])
-    params['e_w'] = abs(params['e_w'])
     if params['e_n'] > params['e_w']:
         params['e_w'], params['e_n'] = params['e_n'], params['e_w']
 
@@ -55,25 +72,11 @@ def fit_with_params(params, X, firings, window_size, i):
     return ret_val
 
 
-def _calc_truncnorm_a_b(clip_a, clip_b, loc, scale=1):
-    """
-    Helper function to calculate the truncated normal distribution between
-    `clip_a` and `clip_b`. Used for hyperparameter optimization.
-    :param clip_a: left limit of the truncated normal distribution.
-    :param clip_b: right limit of the truncated normal distribution.
-    :param loc: mean of the truncated normal distribution.
-    :param scale: standard deviation of the truncated normal distribution.
-    :return: `a` and `b`parameters of scipy.stats.truncnorm.
-    """
-    return (clip_a - loc) / scale, (clip_b - loc) / scale
-
-
 def main():
     np.random.seed(0)
     firing_rates = np.random.random(size=3)/1000
     window_scales = np.random.randint(10, size=3)
-    neuron_params = [NeuronConfig(f, w)
-                     for f in firing_rates
+    neuron_params = [NeuronConfig(f, w) for f in firing_rates
                      for w in window_scales]
     neuron_nr = len(neuron_params)
     channels_nr = 5
@@ -110,11 +113,8 @@ def main():
         firings.set_index('fire_idx', drop=False, inplace=True)
         firings.to_csv(firings_fname, index=False)
 
-    a_alpha, b_alpha = _calc_truncnorm_a_b(0, 1, 0.5)
-    a_beta, b_beta = _calc_truncnorm_a_b(0, 1, 0.5)
-    a_e_w, b_e_w = _calc_truncnorm_a_b(0, 1, 0.05)
-    a_e_n, b_e_n = _calc_truncnorm_a_b(0, 1, 0.0005)
-    a_eta, b_eta = _calc_truncnorm_a_b(0, 1, 0.33)
+
+
     param_space = {
         # 'alpha': [0.39794323643107143],
         # 'beta': [0.47455583402142376],
@@ -123,17 +123,17 @@ def main():
         # 'e_n': [0.41185290298184318],
         # 'eta': [0.34436856439985564],
         # 'theta': [5],
-        'alpha': truncnorm(a_alpha, b_alpha),
-        'beta': truncnorm(a_beta, b_beta),
+        'alpha': TruncNorm(0, 1, loc=0.32, scale=0.2),
+        'beta': TruncNorm(0, 1, loc=0.26, scale=0.2),
         'gamma': randint(5000, 10000),
-        'e_w': truncnorm(a_e_w, b_e_w),
-        'e_n': truncnorm(a_e_n, b_e_n),
-        'eta': truncnorm(a_eta, b_eta),
+        'e_w': TruncNorm(0, 1, loc=0.82, scale=0.2),
+        'e_n': TruncNorm(0, 1, loc=0.3, scale=0.2),
+        'eta': TruncNorm(0, 1, loc=0.25, scale=0.2),
         'theta': randint(20, 80),
-        'dimensions': [channels_nr],
-        'spk_aggr_func': ['mean', 'sum'],
-        'nrn_aggr_func': ['median', 'mean'],
-        'dist_metric': ['cosine', 'hamming'],
+        'dimensions': [channels_nr*window_size],
+        'spk_aggr_func': ['sum'],
+        'nrn_aggr_func': ['median'],
+        'dist_metric': ['hamming'],
         'verbose': [False]
     }
 
@@ -144,12 +144,11 @@ def main():
     # noinspection PyPep8Naming
     X = pd.DataFrame(MinMaxScaler().fit_transform(data),
                      columns=data.columns, index=data.index)
+    X = transform_data(X.as_matrix(), window_size)
     partial_firings = firings[(firings.fire_idx < upper_limit)]
 
-    nbytes = sum(block.values.nbytes for block in X.blocks.values())
-
     n_jobs = psutil.cpu_count() - 2
-    parallel = Parallel(n_jobs=n_jobs, max_nbytes=nbytes)
+    parallel = Parallel(n_jobs=n_jobs, max_nbytes=X.nbytes)
     result = parallel(delayed(fit_with_params)(params, X, partial_firings,
                                                window_size, i)
                       for i, params in enumerate(param_sampler))
