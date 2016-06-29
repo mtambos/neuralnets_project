@@ -74,7 +74,7 @@ def generate_waveforms(channels_nr=4, data_len=10000, window_size=42,
     noise_gen = ArNoiseGen(noise_params=(ar_params, noise_cov))
 
     # now we have all components of the generative model.
-    data = data.sum(axis=0).T
+    data = data.sum(axis=0).T.copy()
     data += noise_gen.query(size=data_len)
 
     return data, neurons
