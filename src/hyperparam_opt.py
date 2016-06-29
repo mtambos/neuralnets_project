@@ -41,6 +41,7 @@ def transform_data(X, window_size):
 
 # noinspection PyPep8Naming
 def fit_with_params(params, X, firings, window_size, i):
+    X = transform_data(X.as_matrix(), window_size)
     pid = os.getpid()
     print "fitting {}th iteration. PID: {}".format(i, pid)
     if params['e_n'] > params['e_w']:
@@ -113,8 +114,6 @@ def main():
         firings.set_index('fire_idx', drop=False, inplace=True)
         firings.to_csv(firings_fname, index=False)
 
-
-
     param_space = {
         # 'alpha': [0.39794323643107143],
         # 'beta': [0.47455583402142376],
@@ -144,11 +143,11 @@ def main():
     # noinspection PyPep8Naming
     X = pd.DataFrame(MinMaxScaler().fit_transform(data),
                      columns=data.columns, index=data.index)
-    X = transform_data(X.as_matrix(), window_size)
     partial_firings = firings[(firings.fire_idx < upper_limit)]
 
     n_jobs = psutil.cpu_count() - 2
-    parallel = Parallel(n_jobs=n_jobs, max_nbytes=X.nbytes)
+    nbytes = sum(block.values.nbytes for block in X.blocks.values())
+    parallel = Parallel(n_jobs=n_jobs, max_nbytes=nbytes)
     result = parallel(delayed(fit_with_params)(params, X, partial_firings,
                                                window_size, i)
                       for i, params in enumerate(param_sampler))
