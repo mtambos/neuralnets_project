@@ -83,10 +83,10 @@ def _get_spike_encodings(firings, unit_encodings, window_size, spk_aggr_func):
     indexes = np.array([np.arange(i, i + window_size) for i in fire_ids])
     if spk_aggr_func == 'mean':
         encodings = unit_encodings[indexes].mean(axis=1)
-        encodings = pd.DataFrame(encodings, index=fire_ids)
     else:
-        encodings = unit_encodings[indexes].sum(axis=1).astype(bool)
-        encodings = pd.DataFrame(encodings, index=fire_ids, dtype=int)
+        encodings = unit_encodings[indexes].sum(axis=1)
+        encodings = encodings.astype(bool).astype(int)
+    encodings = pd.DataFrame(encodings, index=fire_ids)
     return firings.join(encodings)
 
 
