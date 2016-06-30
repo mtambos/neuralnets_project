@@ -136,7 +136,7 @@ def main():
         'verbose': [False]
     }
 
-    param_sampler = ParameterSampler(param_space, n_iter=60)
+    param_sampler = ParameterSampler(param_space, n_iter=30)
 
     upper_limit = len(data)
     data = data.iloc[:upper_limit, :-1]
@@ -145,7 +145,8 @@ def main():
                      columns=data.columns, index=data.index)
     partial_firings = firings[(firings.fire_idx < upper_limit)]
 
-    n_jobs = psutil.cpu_count() - 2
+    # n_jobs = psutil.cpu_count() - 2
+    n_jobs = 4
     nbytes = sum(block.values.nbytes for block in X.blocks.values())
     parallel = Parallel(n_jobs=n_jobs, max_nbytes=nbytes)
     result = parallel(delayed(fit_with_params)(params, X, partial_firings,
