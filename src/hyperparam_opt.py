@@ -7,7 +7,7 @@ import pprint
 
 from joblib import Parallel, delayed, dump
 import pandas as pd
-import psutil
+# import psutil
 import numpy as np
 from sklearn.grid_search import ParameterSampler
 from sklearn.preprocessing import MinMaxScaler
@@ -58,7 +58,9 @@ def fit_with_params(params, X, firings, window_size, i):
         estimator = mgng.MGNG(**mgng_params)
         estimator.fit(X)
         winner_units = estimator.transform(X)
-        score = mgng.scorer(winner_units, window_size, firings,
+        score = mgng.scorer(winner_units, window_size,
+                            firings[firings.fire_idx <
+                                    (len(winner_units) - window_size)],
                             spk_aggr_func, nrn_aggr_func, dist_metric)
         ret_val = score + (params, pid)
         pprint.pprint(ret_val)
