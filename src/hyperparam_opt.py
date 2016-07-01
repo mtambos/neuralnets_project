@@ -138,7 +138,7 @@ def main():
         'verbose': [False]
     }
 
-    param_sampler = ParameterSampler(param_space, n_iter=30)
+    param_sampler = ParameterSampler(param_space, n_iter=60)
 
     upper_limit = len(data)
     data = data.iloc[:upper_limit, :-1]
