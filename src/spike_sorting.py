@@ -1,10 +1,15 @@
+#! /usr/bin/env python
 from __future__ import division, print_function
 
+import json
+
+import click
 import numpy as np
+import pandas as pd
 from scipy import stats
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.base import BaseEstimator, ClusterMixin
-from sklearn.cluster import MiniBatchKMeans
+import sklearn.cluster as cluster
 
 from mgng import mgng
 
@@ -21,12 +26,25 @@ def get_windowed_encodings(unit_encodings, window_size, spk_aggr_func):
     return encodings
 
 
+def transform_data(X, window_size):
+    X = X.as_matrix()
+    if window_size > 1:
+        data_len = X.shape[0] - window_size + 1
+
+        transformed_data = np.array([X[i: i+window_size].T.flatten()
+                                     for i in xrange(data_len)])
+
+        return transformed_data
+
+    return X
+
+
 # noinspection PyPep8Naming
 class SpikeSorter(BaseEstimator, ClusterMixin):
     def __init__(self, clustering_model, entr_threshold=0.1,
                  spk_aggr_func='sum', nrn_aggr_func='median',
                  dist_metric='hamming', window_size=42, sum_threshold=13,
-                 **mgng_params):
+                 transform_window_size=42, **mgng_params):
         assert spk_aggr_func in ('sum', 'mean')
         assert nrn_aggr_func in ('median', 'mean')
 
@@ -38,22 +56,24 @@ class SpikeSorter(BaseEstimator, ClusterMixin):
         self.window_size = window_size
         self.sum_threshold = sum_threshold
         self.clustering_model = clustering_model
+        self.transform_window_size = transform_window_size
 
         self.estimator = None
 
     def fit_predict(self, X, y=None):
         params = self.mgng_params
-        assert params['e_n'] > params['e_w']
+        assert params['e_n'] < params['e_w']
 
         estimator = mgng.MGNG(**params)
         self.estimator = estimator
 
-        estimator.fit(X)
-        winner_units = self.estimator.transform(X)
+        X_trans = transform_data(X, self.transform_window_size)
+        estimator.fit(X_trans)
+        winner_units = estimator.transform(X_trans)
 
         unit_encoder = OneHotEncoder(sparse=False)
         unit_encodings = unit_encoder.fit_transform(
-            winner_units.w1.as_matrix()[:, np.newaxis]
+            winner_units[:, np.newaxis]
         )
 
         entropies = np.array([stats.entropy([enc.mean(), 1-enc.mean()])
@@ -77,10 +97,16 @@ class SpikeSorter(BaseEstimator, ClusterMixin):
 
         clustering_model = self.clustering_model
         clustering_model.fit(windowed_encodings)
-        predictions = clustering_model.predict(
-            windowed_encodings[counts >= window_size]
+
+        predictions_idx = counts >= window_size
+        predictions = -1 * np.ones_like(predictions_idx)
+        predictions[predictions_idx] = clustering_model.predict(
+            windowed_encodings[predictions_idx]
         )
 
+        predictions = np.hstack(
+            (predictions, -1 * np.ones(len(X) - len(predictions)))
+        )
         return predictions
 
     def score(self, X, firings):
@@ -89,3 +115,58 @@ class SpikeSorter(BaseEstimator, ClusterMixin):
                             self.spk_aggr_func, self.nrn_aggr_func,
                             self.dist_metric)
         return score
+
+
+@click.command()
+@click.option('--datafile', required=True, type=click.Path(),
+              help='Path to the file containing the multielectrode recording.')
+@click.option('--outfile', required=True, type=click.Path(),
+              help='Path where the data plus the spike train will be dumped.')
+@click.option('--mgng_params', required=True, type=click.Path(),
+              help="Path to the JSON file containing the MGNG model's "
+                   "hyperparameters.")
+@click.option('--clustering', default='MiniBatchKMeans',
+              help='Member of sklearn.cluster to use for grouping the spikes.')
+@click.option('--entropy_threshld', default=0.1, type=float,
+              help='Code dimensions with less than this entropy across the '
+                   'data will be zeroed.')
+@click.option('--window_size', default=42, type=int,
+              help='Size of the sliding window.')
+@click.option('--sum_threshold', default=13, type=int,
+              help='Windowed encodings with a sum higher than this will be '
+                   'considered spikes.')
+@click.option('--transform_window_size', default=1, type=int,
+              help='If greater than one, transform the input data by sliding '
+                   'a window across it and then stacking everything as a '
+                   'single time step.')
+@click.option('--data_limit', default=-1, type=int,
+              help='Only consider this many timesteps from the data.')
+def main(datafile, outfile, mgng_params, clustering, entropy_threshld,
+         window_size, sum_threshold, transform_window_size, data_limit):
+    cluster_cls = cluster.__dict__[clustering]
+    cluster_model = cluster_cls()
+
+    click.echo('Reading data')
+    data = pd.read_csv(datafile)
+    if data_limit > 0:
+        data = data.iloc[:data_limit, :]
+    click.echo('Sorting spikes')
+    with open(mgng_params, 'rb') as fp:
+        mgng_params = json.load(fp)
+    sorter = SpikeSorter(cluster_model, entr_threshold=entropy_threshld,
+                         window_size=window_size, sum_threshold=sum_threshold,
+                         transform_window_size=transform_window_size,
+                         **mgng_params)
+    spike_train = sorter.fit_predict(X=data)
+
+    click.echo('Storing spike train')
+
+    click.echo('Storing spike train')
+    data['spike_train'] = spike_train
+    data.to_csv(outfile, index=False)
+
+    click.echo('END!')
+
+
+if __name__ == '__main__':
+    main()
