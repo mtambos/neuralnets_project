@@ -41,6 +41,43 @@ def transform_data(X, window_size):
     return X
 
 
+def get_predictions(winner_units, entr_threshold, window_size,
+                    sum_threshold, spk_aggr_func, clustering_model):
+    unit_encoder = OneHotEncoder(sparse=False)
+    unit_encodings = unit_encoder.fit_transform(
+        winner_units[:, np.newaxis]
+    )
+
+    entropies = np.array([stats.entropy([enc.mean(), 1-enc.mean()])
+                          for enc in unit_encodings.T])
+    low_entr_idx = entropies <= entr_threshold
+
+    denoised_unit_encodings = unit_encodings.copy()
+    denoised_unit_encodings[:, low_entr_idx] = 0
+
+    windowed_encodings = get_windowed_encodings(
+        denoised_unit_encodings, window_size=window_size,
+        spk_aggr_func=spk_aggr_func
+    )
+
+    possible_spikes_idx = windowed_encodings.sum(axis=1) >= sum_threshold
+
+    print(pd.Series(possible_spikes_idx).value_counts())
+    conv_mask = np.ones(window_size)
+    counts = np.convolve(possible_spikes_idx, conv_mask, mode='same')
+
+    clustering_model = clustering_model
+    clustering_model.fit(windowed_encodings)
+
+    predictions_idx = counts >= window_size
+    predictions = -1 * np.ones_like(predictions_idx)
+    predictions[predictions_idx] = clustering_model.predict(
+        windowed_encodings[predictions_idx]
+    )
+
+    return predictions
+
+
 # noinspection PyPep8Naming
 class SpikeSorter(BaseEstimator, ClusterMixin):
     def __init__(self, clustering_model, entr_threshold=0.1,
@@ -75,40 +112,10 @@ class SpikeSorter(BaseEstimator, ClusterMixin):
         winner_units = estimator.transform(X_trans)
         joblib.dump(winner_units, 'winner_units.pickle', compress=3)
 
-        unit_encoder = OneHotEncoder(sparse=False)
-        unit_encodings = unit_encoder.fit_transform(
-            winner_units[:, np.newaxis]
-        )
-
-        entropies = np.array([stats.entropy([enc.mean(), 1-enc.mean()])
-                              for enc in unit_encodings.T])
-        low_entr_idx = entropies <= self.entr_threshold
-
-        denoised_unit_encodings = unit_encodings.copy()
-        denoised_unit_encodings[:, low_entr_idx] = 0
-
-        window_size = self.window_size
-        windowed_encodings = get_windowed_encodings(
-            denoised_unit_encodings, window_size=window_size,
-            spk_aggr_func=self.spk_aggr_func
-        )
-
-        possible_spikes_idx = (windowed_encodings.sum(axis=1) >=
-                               self.sum_threshold)
-
-        print(pd.Series(possible_spikes_idx).value_counts())
-        conv_mask = np.ones(window_size)
-        counts = np.convolve(possible_spikes_idx, conv_mask, mode='same')
-
-        clustering_model = self.clustering_model
-        clustering_model.fit(windowed_encodings)
-
-        predictions_idx = counts >= window_size
-        predictions = -1 * np.ones_like(predictions_idx)
-        predictions[predictions_idx] = clustering_model.predict(
-            windowed_encodings[predictions_idx]
-        )
-
+        predictions = get_predictions(winner_units, self.entr_threshold,
+                                       self.window_size, self.sum_threshold,
+                                       self.spk_aggr_func,
+                                       self.clustering_model)
         # noinspection PyTypeChecker
         predictions = np.hstack(
             (predictions, -1 * np.ones(len(X) - len(predictions)))

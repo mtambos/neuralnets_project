@@ -1,0 +1,11 @@
+<component name="libraryTable">
+  <library name="grammarviz2-0.0.1-SNAPSHOT-jar-with-dependencies">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/grammarviz2-0.0.1-SNAPSHOT-jar-with-dependencies.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES>
+      <root url="file://$PROJECT_DIR$/../../../grammarviz2_src/src/test/java" />
+    </SOURCES>
+  </library>
+</component>
